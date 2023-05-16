@@ -92,7 +92,6 @@ class PSimHWaveTree():
     def get_packet_level(self, packet):
         return packet[0]
 
-
     def lca(self, a, b):
         while self.get_packet_level(a) > self.get_packet_level(b):
             a = self.get_mother_packet(a)

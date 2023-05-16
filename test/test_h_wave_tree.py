@@ -6,7 +6,7 @@ class TestFullPSimHWaveTree():
     def __init__(self):
         tree = [
             [
-                [1.5,-0.5]
+                [1.5, -0.5]
             ],
             [
                 [2, 1], [3, -1]

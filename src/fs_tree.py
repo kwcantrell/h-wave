@@ -25,7 +25,6 @@ tree = np.array(
         [6, 2, 0, 8, -1, -1]
     ], dtype=np.complex256
 )
-
 tree = np.add.reduce(np.nan_to_num((tree*basis - tree) / (2*np.pi*1j*np.arange(-3, 3, 1)), nan=0.), axis=1)
 
 # tree = np.add.reduce(tree*basis/(np.sum(2*np.pi*1j*np.arange(-3, 3, 1))), axis=1) - np.add.reduce(tree/((np.sum(2*np.pi*1j*np.arange(-3, 3, 1)))), axis=1)

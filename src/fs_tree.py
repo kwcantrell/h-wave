@@ -1,25 +1,15 @@
 import numpy as np
-import cmath
-# tree = np.array(
-#     [
-#         [-1, 1 + 1j, 2 + 2j],
-#         [0,  3 + 1j,  4 + 2j],
-#         [0,  5 + 1j,  6 + 2j],
-#         [1,  0,  0], 
-#         [1,  3 + 1j,  4 + 2j],
-#         [2, 0, 0],
-#         [2,  9 + 1j, 10 + 2j],
-#         [4, 0, 0], 
-#         [4, 0, 0],
-#         [6, 0, 0],
-#         [6, 0, 0]
-#     ]
-# )
+from scipy.integrate import quad_vec
+
 # basis [-l, -1] are ancestors where -1 is direct parent, -2 is grand parent, ...
 #       [0] is brach length
 #       [1, n] are children where n is max # children
-basis = np.exp(2*np.pi*1j*np.arange(-3, 3, 1))[np.newaxis, :]
-print(basis.shape)
+# basis = lambda t: np.exp(2*np.pi*1j*np.arange(-3, 3, 1)*t)
+# def f(x, c):
+#     return (np.add.reduce(c*basis(x), axis=1)*np.exp(-2*np.pi*1j*x)).real
+
+basis = np.exp(2*np.pi*1j*np.arange(-3, 3, 1), dtype=np.complex256)
+print(basis)
 tree = np.array(
     [
         [-1, -1, -1, -1, 1, 2],
@@ -33,20 +23,26 @@ tree = np.array(
         [4, 1, 0, 1, -1, -1],
         [6, 2, 0, 2, -1, -1],
         [6, 2, 0, 8, -1, -1]
-    ], dtype=np.complex128
+    ], dtype=np.complex256
 )
-tree += 1
-tree *= np.multiply(tree, basis)
-tree = np.add.reduce(tree, axis=1)
-print(cmath.phase(tree[0]))
-def get_leafs(tree):
-    # shift = tree*np.exp(2*np.pi*1j)
-    print(tree.shape, np.apply_along_axis(lambda z: 1j*cmath.phase(z), 0, tree))
-    # print((np.real(tree)*1j*np.angle(tree)*tree - np.real(tree)*1j*np.angle(tree)).imag)
-    # print(shift)
-    return np.nonzero(tree.real)
+
+tree = np.add.reduce(np.nan_to_num((tree*basis - tree) / (2*np.pi*1j*np.arange(-3, 3, 1)), nan=0.), axis=1)
+
+# tree = np.add.reduce(tree*basis/(np.sum(2*np.pi*1j*np.arange(-3, 3, 1))), axis=1) - np.add.reduce(tree/((np.sum(2*np.pi*1j*np.arange(-3, 3, 1)))), axis=1)
+ 
+print('??????', tree)
+# print('??????', quad_vec(f, 0, 1, args=(tree,)))
+# tree += 1
+# tree = np.multiply(tree, np.exp(2*np.pi*1j*np.arange(-3, 3, 1)))
+# tree = np.add.reduce(tree, axis=1)
+# print('????', tree)
+# def get_leafs(tree):
+#     # shift = tree*np.exp(2*np.pi*1j)
+#     print(0.5*(tree.real**2 +tree.imag**2))
+#     # print(shift)
+#     return np.nonzero(tree.real)
 # get_leafs(tree)
-# def get_postorder(tree):
-#     pass
-# # np.argwhere()
-# # postorder = 
+# # def get_postorder(tree):
+# #     pass
+# # # np.argwhere()
+# # # postorder = 

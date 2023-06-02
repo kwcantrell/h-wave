@@ -1,5 +1,61 @@
 import math
+import numpy as np
+from scipy.sparse import csc_array, coo_array, csr_array
 
+
+row =         np.array([0,   1,  1,  2,  2])
+col =         np.array([0,   0,  1,  1,  3])
+data_approx = np.array([3.5, 3,  2,  1,  7.5])
+data_detail = np.array([1.5, 1,  -1, 0, -1.5])
+approx_space = csc_array((data_approx, (row, col)))
+detail_space = csc_array((data_detail, (row, col)))
+# print(approx_space.A)
+# for i in range(3):
+#     for j in range(4):
+#         print(approx_space[i,j], detail_space[i,j])
+# print(approx_space.getcol(0).indptr, approx_space.getcol(0).indices[-1], approx_space.getcol(0).data)
+
+def postorder(a, d):
+    (nr, nc) = a.shape
+    # start = a.getcol(0).indices[-1]
+    gaps = np.array([1])
+    for g in range(3): # levels in tree
+        gaps = np.tile(gaps, 2)
+        gaps[-1] += 1
+    nodes = a.nonzero()
+
+    post_indices = []
+    post_order_data = []
+    def get_start_blocks(r, c, nr, post_indices, post_order_data, a, d, gaps):
+        gap_shift = 2**(nr-r) - 2 
+        left_block = 
+
+        cur_block = c // 2
+        left_pos = start_block
+        if cur_block > 0:
+            left_pos += gaps[cur_block-1] - 1
+
+        if r == nr - 1:
+            right_pos = left_pos + 1
+        else:
+            right_pos = 
+
+        approx, detail = a[r, c], d[r, c]
+        haar_packet = (approx, detail)
+        left = approx + detail
+        right = approx - detail
+        # left_col = 
+        # print(r, c, haar_packet, left, right, start_block, left_pos)
+        print(r, c, haar_packet, start_block, left_pos)
+        return r, c, 5., 5.
+
+    func = lambda r, c: get_start_blocks(r, c, nr, post_indices, post_order_data, a, d, gaps)
+    vfunc = np.vectorize(func, [np.int32, np.int32, np.float32, np.float32])
+    
+    print(vfunc(*nodes))
+    
+
+postorder(approx_space, detail_space)
 class PSimHWaveTree():
     def __init__(self, tree):
         self.tree = tree

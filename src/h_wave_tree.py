@@ -31,11 +31,11 @@ col_ind = torch.tensor([ 0,  1,  0,  1,  2,  3, 2, 3, 6, 7])
 lengths = torch.tensor([ 5,  2,  4,  2,  1,  3, 1, 1, 6, 9])
 max_children=2
 
-# row_ind =  torch.tensor([ 1,  1,  2,  2,  2,  2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,  3,  3,  3,  3,  3])
-# col_ind =  torch.tensor([ 0,  1,  0,  1,  2,  3, 4, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])
-# lengths =  torch.tensor([15, 14, 12, 10, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 1, 2,  3,  4,  5,  6,  7])
-# #                       [ 0,  1,  2,  3,  4,  5, 6, 7, 8, 9,10,11,12,13,14,15,16, 17, 18, 19, 20]
-# max_children=3
+row_ind =  torch.tensor([ 1,  1,  2,  2,  2,  2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,  3,  3,  3,  3,  3], device=device)
+col_ind =  torch.tensor([ 0,  1,  0,  1,  2,  3, 4, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], device=device)
+lengths =  torch.tensor([15, 14, 12, 10, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 1, 2,  3,  4,  5,  6,  7], device=device)
+#                       [ 0,  1,  2,  3,  4,  5, 6, 7, 8, 9,10,11,12,13,14,15,16, 17, 18, 19, 20]
+max_children=3
 class HWave():
     def __init__(self, row_ind, col_ind, lengths, max_children=2):
         self.row_ind, self.col_ind, self.lengths = row_ind, col_ind, lengths
@@ -46,7 +46,7 @@ class HWave():
             self.gaps = torch.tile(self.gaps, (self.max_children,))
             self.gaps[-1] += 1
         self.gaps = torch.concatenate((torch.tensor([0]), self.gaps))
-        self.gaps = torch.cumsum(self.gaps, 0)
+        self.gaps = torch.cumsum(self.gaps, 0).to(device)
 
     # torch.compile()
     def postorder(self):
@@ -56,65 +56,68 @@ class HWave():
         blocks = self.gaps[self.col_ind] + gap_shift
         return self.lengths[torch.argsort(blocks)]
 
-    # torch.compile()
+    def _rank(col_vals):
+        x = col_vals
+        uq_vals,inverse_ixs = torch.unique(x, sorted=True, return_inverse=True)
+        return inverse_ixs
+    
+    torch.compile
+    def _match(left, right):
+        """
+        return.values is bool mask for right and return.indices of matching index positions in right
+        """
+        l_s, r_s = left.shape[0], right.shape[0]
+        return torch.max(left[:, None].expand((l_s, r_s)) == right[None, :].expand((l_s, r_s)), dim=0)
+
+    torch.compile
     def total_branch_lengths(self):
         return torch.sum(self.lengths)
 
-    def tips_to_root_length(self, tips):
-        sums  = torch.zeros_like(tips)
-        rows = torch.clone(self.row_ind)
-
+    torch.compile(mode='max-autotune')
+    def tips_to_root_length(self, tip_rows, tip_cols):
+        sums  = torch.zeros_like(tip_rows)
+        
         for l in range(self.nr-1, 0, -1):
-            col_indices = torch.clone(self.col_ind)
-            
+            tree_indices = (self.row_ind == l)
+            tip_indices = (tip_rows ==l)
 
-            row_indices = rows == l
-            col_indices = torch.max(col_indices[None, :].expand((5, col_indices.shape[0])) == tips[:, None].expand((5, col_indices.shape[0])), dim=0).values
-            tip_indices = torch.where(
-                (row_indices == True) & 
-                (col_indices == True) &
-                (row_indices == col_indices)
-            )
+            # need to match column values
+            tip_col_values = tip_cols[tip_indices]
+            match_info = HWave._match(tip_col_values, self.col_ind).values
 
-            col_vals = torch.clone(self.col_ind[tip_indices])
-            sum_indices = torch.max(tips[None, :].expand((col_vals.shape[0], 5)) == col_vals[:, None].expand((col_vals.shape[0], 5)), dim=0)
-            # lengths_indices = 
-            col_vals = col_vals[sum_indices.indices[sum_indices.values]]
-            # col_vals = (col_vals > col_vals[:, None]).long().sum(0)
-            # test = col_vals[range(len(col_vals)), range(len(col_vals))]
-            def rank(col_vals):
-                x = col_vals
-                uq_vals,inverse_ixs,counts = torch.unique(x, sorted=True, return_inverse=True,return_counts=True)
-                cumsum_counts = counts.cumsum(dim=0)
-                possible_ranks = torch.zeros_like(counts)
-                possible_ranks[1:] = cumsum_counts[:-1]
-                ranks = possible_ranks[inverse_ixs]
-                print(counts)
-                return ranks
-            print(col_vals, self.lengths[tip_indices],#[(col_vals > col_vals[:, None]).long().sum(1)], 
-                  rank(col_vals))
-            # sums[sum_indices.values] += self.lengths[tip_indices]
-            sums[sum_indices.values] += self.lengths[col_vals[sum_indices.indices[sum_indices.values]]]
-            
-            tips[sum_indices.values] = tips[sum_indices.values] // self.max_children
-            # tips /= self.max_children
-            # print(sum_indices, tip_indices, tips)
-            # break
-        print(sums)
-        # while torch.sum(tips) > 0:
+            # create tree length indices
+            tree_match_indices = tree_indices & match_info
+            tree_lengths = self.lengths[tree_match_indices]
+
+            tip_col_match = HWave._match(self.col_ind[tree_match_indices], tip_col_values).indices
+
+            tip_rows[tip_indices] -= 1
+            tip_cols[tip_indices] //= self.max_children
+
+            sums[tip_indices] += tree_lengths[tip_col_match]
+        
+        return sums
+    
+    # def sum_unique_path(self, rows, cols):
+
 
 
 #     def from_treenode(self, treenode):
 #         pass
 
 tree = HWave(row_ind, col_ind, lengths, max_children)
-print(tree.tips_to_root_length(torch.tensor([0, 2, 3, 6, 7])))
-# start = time.time()
-# print(tree.postorder())
-# for _ in range(100000):
-#     tree.postorder()
-# print(f'hwave time elapsed: {time.time() - start}')
-# # tree.postorder()
+# print(tree.tips_to_root_length(torch.tensor([2, 3, 3, 2, 3, 3]),
+#                                torch.tensor([0, 2, 3, 2, 6, 7])))
+rows = torch.tensor([3, 3, 3, 3, 3, 3,  3,  3,  3,  3,  3], device=device)
+cols = torch.tensor([0, 1, 2, 3, 4, 5, 10, 11, 12, 13, 14], device=device)
+# print(tree.tips_to_root_length(rows,cols))
+
+start = time.time()
+print('!!!!', tree.tips_to_root_length(torch.clone(rows),torch.clone(cols)))
+for _ in range(10000):
+    tree.tips_to_root_length(torch.clone(rows),torch.clone(cols))
+print(f'hwave time elapsed: {time.time() - start}')
+# tree.postorder()
 
 # treenode = read('tree.nwk', format='newick', into=TreeNode)
 # start = time.time()

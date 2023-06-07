@@ -1,78 +1,128 @@
 import math
 import numpy as np
-from scipy.sparse import csc_array, coo_array, csr_array
+# from scipy.sparse import csc_array, coo_array, csr_array
 import torch
 from skbio import TreeNode, read
 import time
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # row =         np.array([0,   1,  1,  2,  2])
 # col =         np.array([0,   0,  1,  1,  3])
 # data_approx = np.array([3.5, 3,  2,  1,  7.5])
 # data_detail = np.array([1.5, 1,  -1, 0, -1.5])
 # approx_space = csc_array((data_approx, (row, col)))
 # detail_space = csc_array((data_detail, (row, col)))
-indices =    [[0,   1,  1,  2,  2],
-              [0,   0,  1,  1,  3]]
-data_approx = [3.5, 3,  2,  1,  7.5]
-data_detail = [1.5, 1,  -1, 0, -1.5]
-approx_space = torch.sparse_coo_tensor(indices, data_approx, size=(3, 4)).to(device).coalesce()
-detail_space = torch.sparse_coo_tensor(indices, data_detail, size=(3, 4)).to(device).coalesce()
-print(approx_space.values())
+# indices =    [[0,   1,  1,  2,  2],
+#               [0,   0,  1,  1,  3]]
+# data_approx = [3.5, 3,  2,  1,  7.5]
+# data_detail = [1.5, 1,  -1, 0, -1.5]
+# approx_space = torch.sparse_coo_tensor(indices, data_approx, size=(3, 4), device=device).coalesce()
+# detail_space = torch.sparse_coo_tensor(indices, data_detail, size=(3, 4), device=device).coalesce()
+# max_children = 2
+# indices =       [[0,  1, 1,   1,   2,   2,   2, 2,   2, 2,   2,   2,   2, 2],
+#                  [0,  0, 1,   2,   0,   1,   2, 3,   4, 5,   6,   7,   8, 9]]
+# data_approx = [14.5, 11, 5, 9.5, 7.5, 2.5, 4.5, 1, 1.5, 0, 2.5, 1.5, 5.5, 3]
+# data_detail = [ 0.5,  1, 6, 0.5, 0.5, 3.5, 0.5, 2, 0.5, 1,-0.5, 2.5,-0.5, 4]
+# approx_space = torch.sparse_coo_tensor(indices, data_approx, size=(3, 10), device=device).coalesce()
+# detail_space = torch.sparse_coo_tensor(indices, data_detail, size=(3, 10), device=device).coalesce()
+# max_children = 3
+row_ind = torch.tensor([ 1,  1,  2,  2,  2,  2, 3, 3, 3, 3])
+col_ind = torch.tensor([ 0,  1,  0,  1,  2,  3, 2, 3, 6, 7])
+lengths = torch.tensor([ 5,  2,  4,  2,  1,  3, 1, 1, 6, 9])
+max_children=2
+
+# row_ind =  torch.tensor([ 1,  1,  2,  2,  2,  2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,  3,  3,  3,  3,  3])
+# col_ind =  torch.tensor([ 0,  1,  0,  1,  2,  3, 4, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])
+# lengths =  torch.tensor([15, 14, 12, 10, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 1, 2,  3,  4,  5,  6,  7])
+# #                       [ 0,  1,  2,  3,  4,  5, 6, 7, 8, 9,10,11,12,13,14,15,16, 17, 18, 19, 20]
+# max_children=3
 class HWave():
-    def __init__(self, approx_space, detail_space):
-        self.approx_space = approx_space
-        self.detail_space = detail_space
-        (self.nr, self.nc) = self.approx_space.shape
-    
+    def __init__(self, row_ind, col_ind, lengths, max_children=2):
+        self.row_ind, self.col_ind, self.lengths = row_ind, col_ind, lengths
+        self.nr, self.nc = torch.max(self.row_ind)+1, torch.max(self.col_ind)+1
+        self.max_children=max_children
+        self.gaps = torch.tensor([1])
+        for _ in range(self.nr): # levels in tree
+            self.gaps = torch.tile(self.gaps, (self.max_children,))
+            self.gaps[-1] += 1
+        self.gaps = torch.concatenate((torch.tensor([0]), self.gaps))
+        self.gaps = torch.cumsum(self.gaps, 0)
+
+    # torch.compile()
     def postorder(self):
         """Returns dense array of postorder branch lengths
         """
-        gaps = np.array([1])
-        for _ in range(3): # levels in tree
-            gaps = np.tile(gaps, 2)
-            gaps[-1] += 1
-        nodes = self.approx_space.nonzero()
+        gap_shift = ((self.max_children**(self.nr-self.row_ind)-self.max_children)/(self.max_children-1))*(self.col_ind+1)
+        blocks = self.gaps[self.col_ind] + gap_shift
+        return self.lengths[torch.argsort(blocks)]
 
-        def postorder_info(r, c, gaps):
-            gap_shift = 2**(self.nr-r) - 2
-            cur_block = c * 2
-            left_block = np.sum(gaps[:cur_block] + gap_shift) + gap_shift
-            right_block = left_block+gaps[cur_block] + gap_shift
-            approx, detail = self.approx_space[r, c], self.detail_space[r, c]
-            left_value = approx + detail
-            right_value = approx - detail
-            return left_block, right_block, left_value, right_value
-        func = lambda r, c: postorder_info(r, c, gaps)
-        vfunc = np.vectorize(func, [np.int32, np.int32, np.float32, np.float32], cache=True)
-        
-        info = vfunc(*nodes)
-        col_indices = np.concatenate(info[:2])
-        post_order_data = np.concatenate(info[2:])
-        post_order_array = csr_array((post_order_data, col_indices, np.array([0, col_indices.size])))
-        post_order_array.sort_indices()
-        return post_order_array[:, post_order_array.nonzero()[1]].A
-    
+    # torch.compile()
     def total_branch_lengths(self):
-        return torch.sum(self.approx_space.values() * 2)
+        return torch.sum(self.lengths)
 
-    def from_treenode(self, treenode):
-        pass
+    def tips_to_root_length(self, tips):
+        sums  = torch.zeros_like(tips)
+        rows = torch.clone(self.row_ind)
 
-treenode = read('tree.nwk', format='newick', into=TreeNode)
-tree = HWave(approx_space, detail_space)
-start = time.time()
-print(tree.total_branch_lengths())
-for _ in range(10000):
-    tree.total_branch_lengths()
-print(f'hwave time elapsed: {time.time() - start}')
+        for l in range(self.nr-1, 0, -1):
+            col_indices = torch.clone(self.col_ind)
+            
 
-start = time.time()
-for _ in range(10000):
-    sum = 0
-    for node in treenode.levelorder(include_self=True):
-        sum += node.length
-print(f'treenode time elapsed: {time.time() - start}')
+            row_indices = rows == l
+            col_indices = torch.max(col_indices[None, :].expand((5, col_indices.shape[0])) == tips[:, None].expand((5, col_indices.shape[0])), dim=0).values
+            tip_indices = torch.where(
+                (row_indices == True) & 
+                (col_indices == True) &
+                (row_indices == col_indices)
+            )
+
+            col_vals = torch.clone(self.col_ind[tip_indices])
+            sum_indices = torch.max(tips[None, :].expand((col_vals.shape[0], 5)) == col_vals[:, None].expand((col_vals.shape[0], 5)), dim=0)
+            # lengths_indices = 
+            col_vals = col_vals[sum_indices.indices[sum_indices.values]]
+            # col_vals = (col_vals > col_vals[:, None]).long().sum(0)
+            # test = col_vals[range(len(col_vals)), range(len(col_vals))]
+            def rank(col_vals):
+                x = col_vals
+                uq_vals,inverse_ixs,counts = torch.unique(x, sorted=True, return_inverse=True,return_counts=True)
+                cumsum_counts = counts.cumsum(dim=0)
+                possible_ranks = torch.zeros_like(counts)
+                possible_ranks[1:] = cumsum_counts[:-1]
+                ranks = possible_ranks[inverse_ixs]
+                print(counts)
+                return ranks
+            print(col_vals, self.lengths[tip_indices],#[(col_vals > col_vals[:, None]).long().sum(1)], 
+                  rank(col_vals))
+            # sums[sum_indices.values] += self.lengths[tip_indices]
+            sums[sum_indices.values] += self.lengths[col_vals[sum_indices.indices[sum_indices.values]]]
+            
+            tips[sum_indices.values] = tips[sum_indices.values] // self.max_children
+            # tips /= self.max_children
+            # print(sum_indices, tip_indices, tips)
+            # break
+        print(sums)
+        # while torch.sum(tips) > 0:
+
+
+#     def from_treenode(self, treenode):
+#         pass
+
+tree = HWave(row_ind, col_ind, lengths, max_children)
+print(tree.tips_to_root_length(torch.tensor([0, 2, 3, 6, 7])))
+# start = time.time()
+# print(tree.postorder())
+# for _ in range(100000):
+#     tree.postorder()
+# print(f'hwave time elapsed: {time.time() - start}')
+# # tree.postorder()
+
+# treenode = read('tree.nwk', format='newick', into=TreeNode)
+# start = time.time()
+# for _ in range(100000):
+#     sum = 0
+#     for node in treenode.levelorder(include_self=True):
+#         sum += node.length
+# print(f'treenode time elapsed: {time.time() - start}')
 
 
 # class PSimHWaveTree():

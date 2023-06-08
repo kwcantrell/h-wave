@@ -54,21 +54,30 @@ class HWave():
     
     @torch.jit.export
     def tips_to_root_length(self, tip_rows: torch.Tensor, tip_levels: torch.Tensor):
-        sums  = torch.zeros(tip_rows.size(0), dtype=torch.float64)
+        sums  = torch.zeros(tip_rows.size(0), dtype=torch.float64, device='cuda')
         tip_levels = torch.clone(tip_levels)
         for l in torch.arange(self.nr-1, 0, -1):
             tip_indices = tip_rows.ge(l).argwhere().flatten()
             tip_level_values = tip_levels.take(tip_indices)
-
-            tree_mask = self.row_ind.ge(l).bitwise_and_(self._match_values(tip_level_values, self.level_ind))
-            tree_level_values = self.level_ind.masked_select(tree_mask)
-            tree_match_tip_indices = self._match(tree_level_values, tip_level_values).indices
+            
+            # need to zip tree level and tree row...
+            # tree_row_indices = self.row_ind.ge(l).argwhere().flatten()
+            # tree_level_values = self.level_ind.take(tree_row_indices)
+            # tree_level_mask = tree_level_values.eq(tip_level_values[0])
+            # # tree_level_mask = torch.full(tree_row_mask.size(), 0, dtype=torch.bool)
+            # [tree_level_mask.bitwise_or_(tree_level_values.eq(tv)) for tv in tip_level_values[1:]]
+            # print(tree_level_values.masked_select(tree_level_mask))
+            # # tree_mask = [tree_row_mask.bitwise_and(self.level_ind.eq(tv)) for tv in tip_level_values]
+            # # tree_mask = self.row_ind.ge(l).bitwise_and_(self._match_values(tip_level_values, self.level_ind))
+            # # tree_level_values = self.level_ind.masked_select(tree_mask)
+            # # tree_match_tip_indices = self._match(tree_level_values, tip_level_values).indices
           
-            tree_parent_values = self.parent_ind.masked_select(tree_mask).take(tree_match_tip_indices)
-            tree_length_values = self.lengths.masked_select(tree_mask).take(tree_match_tip_indices)
+            # # tree_parent_values = self.parent_ind.masked_select(tree_mask).take(tree_match_tip_indices)
+            # # tree_length_values = self.lengths.masked_select(tree_mask).take(tree_match_tip_indices)
 
-            sums.scatter_add_(0, tip_indices, tree_length_values)
-            tip_levels.scatter_(0, tip_indices, tree_parent_values)
+            # # sums.scatter_add_(0, tip_indices, tree_length_values)
+            # # tip_levels.scatter_(0, tip_indices, tree_parent_values)
+        print(tip_levels)
         return sums
     
     @torch.jit.export
@@ -129,7 +138,7 @@ def from_treenode(treenode):
         next_level_nodes = []
         cur_level += 1
 
-    return (torch.tensor(row_ind), torch.tensor(level_ind), torch.tensor(parent_ind), torch.tensor(lengths, dtype=torch.float64), max_children)
+    return (torch.tensor(row_ind, device=device), torch.tensor(level_ind, device=device), torch.tensor(parent_ind, device=device), torch.tensor(lengths, dtype=torch.float64, device=device), max_children)
 
 def compare_trees(tree_type):
     if tree_type == 'ternary':
@@ -160,7 +169,7 @@ def compare_trees(tree_type):
     tip_rows, tip_levels, tip_parents = tree_hwave.tips()
     print('YEAH!!!!!!!!!!!!')
     # print(tree_hwave.tips_to_root_length(tip_rows, tip_levels))
-    wave_lengths = lambda: tree_hwave.tips_to_root_length(tip_rows, tip_levels)
+    wave_lengths = lambda: tree_hwave.tips_to_root_length(tip_rows.to(device), tip_levels)
     wave_postorder = lambda: tree_hwave.postorder()
     wave_tips = lambda: tree_hwave.tips()
     def tips_lengths():
@@ -183,11 +192,11 @@ def compare_trees(tree_type):
     def time_tree(tree_func):   
         print(tree_func())
         # start = time.time()
-        # for _ in range(100):
+        # for _ in range(1):
         #     tree_func()
         # print(f'hwave time elapsed: {time.time() - start}')
 
-    # time_tree(wave_lengths)
-    time_tree(tips_lengths)
+    time_tree(wave_lengths)
+    # time_tree(tips_lengths)
 
-compare_trees('test')
+compare_trees('binary')
